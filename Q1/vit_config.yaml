@@ -1,0 +1,10 @@
+d_model: 20
+n_classes: 10
+img_size: [32, 32]
+patch_size: [2, 2]
+n_channels: 3
+n_heads: 10
+n_layers: 10
+batch_size: 128
+epochs: 1
+alpha: 0.005
