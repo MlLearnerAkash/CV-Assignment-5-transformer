@@ -1,4 +1,6 @@
-
+#@Author: Akash
+#@Date: 18/04/2025
+#@Place: IIIT, Hyd
 import torch
 import torch.nn as nn
 import torchvision.transforms as T
@@ -23,7 +25,7 @@ import torch
 import matplotlib.pyplot as plt
 import wandb
 
-
+from img_transforms import get_augmentation_set
 
 with open("vit_config.yaml", "r") as file:
     config = yaml.safe_load(file)
@@ -40,8 +42,9 @@ batch_size = config["batch_size"]
 epochs    = config["epochs"]
 alpha     = config["alpha"]
 pos_type = config["pos_type"]
+aug_type = config["aug_type"]
 
-exp_name = f"vit-patchsize-{patch_size[0]}-attention_head-{n_heads}-layer-{n_layers}"
+exp_name = f"vit-patchsize-{patch_size[0]}-attention_head-{n_heads}-layer-{n_layers}-augmentation-{aug_type}"
 
 wandb.init(project = "vit-image-classification", name = exp_name)
 
@@ -63,10 +66,14 @@ wandb.config.update(config)
 
 
 
-transform = T.Compose([
-  # T.Resize(img_size),
-  T.ToTensor()
-])
+# transform = T.Compose([
+#   # T.Resize(img_size),
+#   T.ToTensor()
+# ])
+
+#NOTE: Basic, 2. Stronger color/geometric changes, robustness , 3. Regularization, robust feature learning, patch-level diversity
+transform = get_augmentation_set(aug_type) #One of "basic", "strong", or "mixing"
+
 
 train_set = CIFAR10(
   root="/home/akash/ws/cv_assignment/assignment-5-MlLearnerAkash/Q1/dataset", train=True, download=True, transform=transform
@@ -201,76 +208,7 @@ if __name__ == "__main__":
 
 
     # Testing loop: accumulate predictions and ground truths, then log accuracy and confusion matrix.
-    transformer.eval()  # Set to evaluation mode
-    all_preds = []
-    all_labels = []
-
-    with torch.no_grad():
-        correct = 0
-        total = 0
-        for images, labels in test_loader:
-            images, labels = images.to(device), labels.to(device)
-            outputs = transformer(images)
-            _, predicted = torch.max(outputs.data, 1)
-            total += labels.size(0)
-            correct += (predicted == labels).sum().item()
-            
-            # Accumulate predictions and labels for confusion matrix
-            all_preds.extend(predicted.cpu().numpy())
-            all_labels.extend(labels.cpu().numpy())
-
-        accuracy = 100 * correct / total
-        print(f'\nModel Accuracy: {accuracy:.2f} %')
-        wandb.log({"test_accuracy": accuracy})
-
-    # Compute confusion matrix using sklearn
-    cm = confusion_matrix(all_labels, all_preds)
-
-
-    # Plot confusion matrix as a heatmap for logging.
-    def plot_confusion_matrix(cm, classes,
-                            normalize=False,
-
-                            title='Confusion matrix',
-                            cmap=plt.cm.Blues):
-        """
-        This function prints and plots the confusion matrix.
-        Normalization can be applied by setting `normalize=True`.
-        """
-        if normalize:
-            cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
-        
-        plt.figure(figsize=(8, 6))
-        plt.imshow(cm, interpolation='nearest', cmap=cmap)
-        plt.title(title)
-        plt.colorbar()
-        tick_marks = np.arange(len(classes))
-        plt.xticks(tick_marks, classes, rotation=45)
-        plt.yticks(tick_marks, classes)
-        
-        fmt = '.2f' if normalize else 'd'
-        thresh = cm.max() / 2.
-        
-        for i, j in itertools.product(range(cm.shape[0]), range(cm.shape[1])):
-            plt.text(j, i, format(cm[i, j], fmt),
-                    horizontalalignment="center",
-                    color="white" if cm[i, j] > thresh else "black")
-        
-        plt.ylabel('True label')
-        plt.xlabel('Predicted label')
-        plt.tight_layout()
-        return plt.gcf()
-
-    # Define class names for the confusion matrix (modify as needed)
-    class_names = [str(i) for i in range(n_classes)]
-    cm_fig = plot_confusion_matrix(cm, classes=class_names, title="Confusion Matrix")
-
-    # Log the confusion matrix figure with wandb
-    wandb.log({"confusion_matrix": wandb.Image(cm_fig)})
-
-    # Optionally, you can finish the wandb run:
-    wandb.finish()
-
+    
 
 # %% [markdown]
 # #### Visualization
