@@ -10,6 +10,7 @@ import wandb
 import matplotlib.pyplot as plt
 from sklearn.metrics import confusion_matrix
 import itertools
+import math
 
 class PatchEmbedding(nn.Module):
   def __init__(self, d_model, img_size, patch_size, n_channels):
@@ -38,35 +39,98 @@ class PatchEmbedding(nn.Module):
     return x
 
 
+# class PositionalEncoding(nn.Module):
+#   def __init__(self, d_model, max_seq_length):
+#     super().__init__()
+
+#     self.cls_token = nn.Parameter(torch.randn(1, 1, d_model)) # Classification Token
+
+#     # Creating positional encoding
+#     pe = torch.zeros(max_seq_length, d_model)
+
+#     for pos in range(max_seq_length):
+#       for i in range(d_model):
+#         if i % 2 == 0:
+#           pe[pos][i] = np.sin(pos/(10000 ** (i/d_model)))
+#         else:
+#           pe[pos][i] = np.cos(pos/(10000 ** ((i-1)/d_model)))
+
+#     self.register_buffer('pe', pe.unsqueeze(0))
+
+#   def forward(self, x):
+#     # Expand to have class token for every image in batch
+#     tokens_batch = self.cls_token.expand(x.size()[0], -1, -1)
+
+#     # Adding class tokens to the beginning of each embedding
+#     x = torch.cat((tokens_batch,x), dim=1)
+
+#     # Add positional encoding to embeddings
+#     x = x + self.pe
+
+#     return x
+
+
 class PositionalEncoding(nn.Module):
-  def __init__(self, d_model, max_seq_length):
-    super().__init__()
+    def __init__(self, d_model, max_seq_length, pos_type='sinusoidal', 
+                 img_size=None, patch_size=None):
+        super().__init__()
+        self.pos_type = pos_type
+        self.d_model = d_model
+        self.max_seq_length = max_seq_length
+        
+        # CLS token (present in all configurations)
+        self.cls_token = nn.Parameter(torch.randn(1, 1, d_model))
+        
+        if self.pos_type == '1d_learned':
+            self.pos_embed = nn.Parameter(torch.randn(1, max_seq_length, d_model))
+        elif self.pos_type == '2d_learned':
+            assert img_size and patch_size, "Need img_size and patch_size for 2D"
+            self.h_patches = img_size[0] // patch_size[0]
+            self.w_patches = img_size[1] // patch_size[1]
+            self.row_embed = nn.Embedding(self.h_patches, d_model)
+            self.col_embed = nn.Embedding(self.w_patches, d_model)
+            # Separate learnable positional embedding for CLS token
+            self.cls_pos_embed = nn.Parameter(torch.randn(1, 1, d_model))
+        elif self.pos_type == 'sinusoidal':
+            pe = torch.zeros(max_seq_length, d_model)
+            position = torch.arange(0, max_seq_length, dtype=torch.float).unsqueeze(1)
+            div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
+            pe[:, 0::2] = torch.sin(position * div_term)
+            pe[:, 1::2] = torch.cos(position * div_term)
+            self.register_buffer('pe', pe.unsqueeze(0))
 
-    self.cls_token = nn.Parameter(torch.randn(1, 1, d_model)) # Classification Token
+    def forward(self, x):
+        B = x.size(0)  # Batch size
+        
+        # Add CLS token to all configurations
+        cls_tokens = self.cls_token.expand(B, -1, -1)
+        x = torch.cat([cls_tokens, x], dim=1)
+        
+        if self.pos_type == '1d_learned':
+            x = x + self.pos_embed
+        elif self.pos_type == '2d_learned':
+            # Generate grid positions
+            rows = torch.arange(self.h_patches, device=x.device).view(-1,1).expand(-1, self.w_patches)
+            cols = torch.arange(self.w_patches, device=x.device).view(1,-1).expand(self.h_patches, -1)
+            
+            # Convert to 1D sequences
+            rows = rows.reshape(-1)
+            cols = cols.reshape(-1)
+            
+            # Get 2D positional embeddings (n_patches, d_model)
+            pos_emb = self.row_embed(rows) + self.col_embed(cols)
+            
+            # Add CLS positional embedding and expand to batch size
+            cls_pos = self.cls_pos_embed.expand(B, -1, -1)  # (B, 1, d_model)
+            patch_pos = pos_emb.unsqueeze(0).expand(B, -1, -1)  # (B, n_patches, d_model)
+            
+            # Combine CLS and patch positions
+            pos_emb = torch.cat([cls_pos, patch_pos], dim=1)
+            x = x + pos_emb
+        elif self.pos_type == 'sinusoidal':
+            x = x + self.pe
 
-    # Creating positional encoding
-    pe = torch.zeros(max_seq_length, d_model)
-
-    for pos in range(max_seq_length):
-      for i in range(d_model):
-        if i % 2 == 0:
-          pe[pos][i] = np.sin(pos/(10000 ** (i/d_model)))
-        else:
-          pe[pos][i] = np.cos(pos/(10000 ** ((i-1)/d_model)))
-
-    self.register_buffer('pe', pe.unsqueeze(0))
-
-  def forward(self, x):
-    # Expand to have class token for every image in batch
-    tokens_batch = self.cls_token.expand(x.size()[0], -1, -1)
-
-    # Adding class tokens to the beginning of each embedding
-    x = torch.cat((tokens_batch,x), dim=1)
-
-    # Add positional encoding to embeddings
-    x = x + self.pe
-
-    return x
+        return x
 
 '''
 class AttentionHead(nn.Module):
@@ -245,7 +309,7 @@ class TransformerEncoder(nn.Module):
 
 
 class VisionTransformer(nn.Module):
-  def __init__(self, d_model, n_classes, img_size, patch_size, n_channels, n_heads, n_layers):
+  def __init__(self, d_model, n_classes, img_size, patch_size, n_channels, n_heads, n_layers, pos_type):
     super().__init__()
 
     assert img_size[0] % patch_size[0] == 0 and img_size[1] % patch_size[1] == 0, "img_size dimensions must be divisible by patch_size dimensions"
@@ -257,12 +321,13 @@ class VisionTransformer(nn.Module):
     self.patch_size = patch_size # Patch size
     self.n_channels = n_channels # Number of channels
     self.n_heads = n_heads # Number of attention heads
+    self.pos_type = pos_type
 
     self.n_patches = (self.img_size[0] * self.img_size[1]) // (self.patch_size[0] * self.patch_size[1])
     self.max_seq_length = self.n_patches + 1
 
     self.patch_embedding = PatchEmbedding(self.d_model, self.img_size, self.patch_size, self.n_channels)
-    self.positional_encoding = PositionalEncoding( self.d_model, self.max_seq_length)
+    self.positional_encoding = PositionalEncoding( self.d_model, self.max_seq_length, pos_type= self.pos_type, img_size=self.img_size, patch_size=self.patch_size)
     self.transformer_encoder = nn.Sequential(*[TransformerEncoder( self.d_model, self.n_heads) for _ in range(n_layers)])
 
     # Classification MLP

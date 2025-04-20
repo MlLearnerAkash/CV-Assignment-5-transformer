@@ -39,6 +39,7 @@ n_layers  = config["n_layers"]
 batch_size = config["batch_size"]
 epochs    = config["epochs"]
 alpha     = config["alpha"]
+pos_type = config["pos_type"]
 
 exp_name = f"vit-patchsize-{patch_size[0]}-attention_head-{n_heads}-layer-{n_layers}"
 
@@ -180,7 +181,7 @@ if __name__ == "__main__":
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
-    transformer = VisionTransformer(d_model, n_classes, img_size, patch_size, n_channels, n_heads, n_layers).to(device)
+    transformer = VisionTransformer(d_model, n_classes, img_size, patch_size, n_channels, n_heads, n_layers, pos_type = pos_type).to(device)
 
     save_path = exp_name
     criterion = nn.CrossEntropyLoss()
