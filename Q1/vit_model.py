@@ -68,7 +68,7 @@ class PositionalEncoding(nn.Module):
 
     return x
 
-
+'''
 class AttentionHead(nn.Module):
   def __init__(self, d_model, head_size):
     super().__init__()
@@ -143,7 +143,75 @@ class MultiHeadAttention(nn.Module):
 
         return x
 
+'''
 
+class AttentionHead(nn.Module):
+    def __init__(self, d_model, head_size):
+        super().__init__()
+        self.head_size = head_size
+        self.query = nn.Linear(d_model, head_size)
+        self.key   = nn.Linear(d_model, head_size)
+        self.value = nn.Linear(d_model, head_size)
+        self.attn_weights = None
+
+    def forward(self, x):
+        # x: (B, N, d_model)
+        Q = self.query(x)           # → (B, N, head_size)
+        K = self.key(x)             # → (B, N, head_size)
+        V = self.value(x)           # → (B, N, head_size)
+
+        # Compute scaled dot‑product attention
+        scores = Q @ K.transpose(-2, -1)                # → (B, N, N)
+        scores = scores / (self.head_size ** 0.5)
+        attn  = torch.softmax(scores, dim=-1)           # → (B, N, N)
+
+        # save for visualization
+        self.attn_weights = attn.detach().clone()      # → (B, N, N)
+
+        out = attn @ V                                  # → (B, N, head_size)
+        return out
+
+
+class MultiHeadAttention(nn.Module):
+    def __init__(self, d_model, n_heads):
+        super().__init__()
+        assert d_model % n_heads == 0, "d_model must be divisible by n_heads"
+        self.d_model = d_model
+        self.n_heads = n_heads
+        self.head_dim = d_model // n_heads
+
+        # create n_heads separate AttentionHead modules
+        self.heads = nn.ModuleList(
+            [AttentionHead(d_model, self.head_dim) for _ in range(n_heads)]
+        )
+
+        # final linear projection
+        self.proj = nn.Linear(d_model, d_model)
+
+        # to store the stacked attention weights
+        self.attn_weights = None
+
+    def forward(self, x):
+        # x: (B, N, d_model)
+        head_outputs = []
+        head_weights = []
+
+        # run each head in parallel
+        for head in self.heads:
+            out = head(x)                    # → (B, N, head_dim)
+            head_outputs.append(out)
+            head_weights.append(head.attn_weights)  # (B, N, N)
+
+        # concatenate all head outputs → (B, N, n_heads * head_dim == d_model)
+        concat = torch.cat(head_outputs, dim=-1)
+
+        # final linear projection
+        x = self.proj(concat)               # → (B, N, d_model)
+
+        # stack attention maps → (B, n_heads, N, N)
+        self.attn_weights = torch.stack(head_weights, dim=1)
+
+        return x
 class TransformerEncoder(nn.Module):
   def __init__(self, d_model, n_heads, r_mlp=4):
     super().__init__()
