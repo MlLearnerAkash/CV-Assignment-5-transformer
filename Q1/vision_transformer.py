@@ -44,7 +44,7 @@ alpha     = config["alpha"]
 pos_type = config["pos_type"]
 aug_type = config["aug_type"]
 
-exp_name = f"vit-patchsize-{patch_size[0]}-attention_head-{n_heads}-layer-{n_layers}-augmentation-{aug_type}"
+exp_name = f"vit-patchsize-{patch_size[0]}-attention_head-{n_heads}-layer-{n_layers}-augmentation-{aug_type}-pos_type-{pos_type}"
 
 wandb.init(project = "vit-image-classification", name = exp_name)
 
@@ -107,6 +107,7 @@ def train_transformer(transformer, save_path, criterion, epochs, optimizer,
         train_loss = 0.0
         
         train_bar = tqdm(train_loader, desc=f"[{epoch}/{epochs}] Train", leave=False)
+        i = 0
         for inputs, labels in train_bar:
             inputs, labels = inputs.to(device), labels.to(device)
             optimizer.zero_grad()
@@ -117,6 +118,9 @@ def train_transformer(transformer, save_path, criterion, epochs, optimizer,
             
             train_loss += loss.item()
             train_bar.set_postfix(loss=f"{loss.item():.4f}")
+            i+=1
+            if i>=1000:
+                break
 
         scheduler.step()
         avg_train = train_loss / len(train_loader)
@@ -205,7 +209,75 @@ if __name__ == "__main__":
                         test_loader=test_loader)
 
 
+    transformer.eval()  # Set to evaluation mode
+    all_preds = []
+    all_labels = []
 
+    with torch.no_grad():
+        correct = 0
+        total = 0
+        for images, labels in test_loader:
+            images, labels = images.to(device), labels.to(device)
+            outputs = transformer(images)
+            _, predicted = torch.max(outputs.data, 1)
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
+            
+            # Accumulate predictions and labels for confusion matrix
+            all_preds.extend(predicted.cpu().numpy())
+            all_labels.extend(labels.cpu().numpy())
+
+        accuracy = 100 * correct / total
+        print(f'\nModel Accuracy: {accuracy:.2f} %')
+        wandb.log({"test_accuracy": accuracy})
+
+    # Compute confusion matrix using sklearn
+    cm = confusion_matrix(all_labels, all_preds)
+
+
+    # Plot confusion matrix as a heatmap for logging.
+    def plot_confusion_matrix(cm, classes,
+                            normalize=False,
+
+                            title='Confusion matrix',
+                            cmap=plt.cm.Blues):
+        """
+        This function prints and plots the confusion matrix.
+        Normalization can be applied by setting `normalize=True`.
+        """
+        if normalize:
+            cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
+        
+        plt.figure(figsize=(8, 6))
+        plt.imshow(cm, interpolation='nearest', cmap=cmap)
+        plt.title(title)
+        plt.colorbar()
+        tick_marks = np.arange(len(classes))
+        plt.xticks(tick_marks, classes, rotation=45)
+        plt.yticks(tick_marks, classes)
+        
+        fmt = '.2f' if normalize else 'd'
+        thresh = cm.max() / 2.
+        
+        for i, j in itertools.product(range(cm.shape[0]), range(cm.shape[1])):
+            plt.text(j, i, format(cm[i, j], fmt),
+                    horizontalalignment="center",
+                    color="white" if cm[i, j] > thresh else "black")
+        
+        plt.ylabel('True label')
+        plt.xlabel('Predicted label')
+        plt.tight_layout()
+        return plt.gcf()
+
+    # Define class names for the confusion matrix (modify as needed)
+    class_names = [str(i) for i in range(n_classes)]
+    cm_fig = plot_confusion_matrix(cm, classes=class_names, title="Confusion Matrix")
+
+    # Log the confusion matrix figure with wandb
+    wandb.log({"confusion_matrix": wandb.Image(cm_fig)})
+
+    # Optionally, you can finish the wandb run:
+    wandb.finish()
 
     # Testing loop: accumulate predictions and ground truths, then log accuracy and confusion matrix.
     
