@@ -5,6 +5,9 @@ patch_size: [2, 2]
 n_channels: 3
 n_heads: 10
 n_layers: 10
-batch_size: 128
+batch_size: 316
 epochs: 100
-alpha: 0.05
+alpha: 0.002
+num_layers: 10
+pos_type: "sinusoidal" #options: sinusoidal, 1d_learner, 2d_learned, none
+aug_type: "strong" #options: basic, mix, strong
